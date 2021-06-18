@@ -1,0 +1,189 @@
+---
+title: "datathon"
+author: "Fangzhou Yuan"
+date: "2021/5/28"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r}
+library(readr)
+nwhl <- read_csv("Rotman MMA Summer Datathon NWHL.csv")
+```
+```{r}
+library(ggplot2)
+library(plyr)
+library(dplyr)
+```
+
+```{r}
+nwhl[c("game_date","Home Team", "Away Team")] %>% group_by_all %>% count
+```
+data includes 15 games 
+
+```{r}
+table(nwhl$Event)
+```
+negative types: incomplete play, penalty taken (player is negative, player 2 is positive)
+positive: everything else
+
+```{r}
+nwhl_goals <- nwhl[nwhl$Event == "Goal",]
+ggplot(nwhl_goals, aes(x=`X Coordinate`, y=`Y Coordinate`))+geom_point(size=2, shape=20)+xlim(0,200)+ylim(0,85)
+```
+```{r}
+nwhl_shots <- nwhl[nwhl$Event == "Shot",]
+ggplot(nwhl_shots, aes(x=`X Coordinate`, y=`Y Coordinate`))+geom_point(size=2, shape=20)+xlim(0,200)+ylim(0,85)
+```
+```{r}
+nwhl_plays <- nwhl[nwhl$Event == "Play",]
+ggplot(nwhl_plays, aes(x=Player))+geom_bar()+geom_text(stat = 'count', aes(label=..count..), vjust=-1)
+```
+```{r}
+top_pass_players <- nwhl_plays %>% count(Player) %>% top_n(20) %>% pull(Player)
+nwhl_plays %>% filter(Player %in% top_pass_players) %>%
+ggplot(., aes(x=Player))+geom_bar()+geom_text(stat = 'count', aes(label=..count..), vjust=-1)+coord_flip()
+```
+```{r}
+worst_pass_players <- nwhl_incomplete_plays %>% count(Player) %>% top_n(20) %>% pull(Player)
+nwhl_plays %>% filter(Player %in% top_pass_players) %>%
+ggplot(., aes(x=Player))+geom_bar()+geom_text(stat = 'count', aes(label=..count..), vjust=-1)+coord_flip()
+```
+
+```{r}
+nwhl[c("game_date","Home Team", "Away Team")] %>% group_by_all %>% count
+```
+
+
+New Features for Shots and Goals
+
+goals shots conversion rate for players
+```{r}
+goals_counts <- data.frame(dplyr::count(nwhl_goals, nwhl_goals$Player))
+shots_counts <- data.frame(dplyr::count(nwhl_shots, nwhl_shots$Player))
+# goals_shots <- merge(goals_counts, shots_counts, by.x = "nwhl_goals.Player", by.y = "nwhl_shots.Player")
+goals_shots <- dplyr::left_join(shots_counts, goals_counts, by=c("nwhl_shots.Player"="nwhl_goals.Player"))
+goals_shots[is.na(goals_shots)] <- 0
+colnames(goals_shots) <- c("Player", "shots", "goals")
+goals_shots$GoalperShot <- goals_shots$goals / goals_shots$shots
+```
+
+transformation, z score, percentile, and scores
+```{r}
+goals_shots$trans <- log((1+goals_shots$goals) / (1+goals_shots$shots))
+goals_shots$z <- (goals_shots$trans - mean(goals_shots$trans))/sd(goals_shots$trans)
+goals_shots$percentile <- pnorm(goals_shots$z)
+goals_shots$score <- cut(x = goals_shots$percentile, breaks = c(0, 0.2, 0.4, 0.6, 0.8, 1), labels = c(1,2,3,4,5))
+```
+
+
+
+shots on target
+```{r}
+nwhl_shots_on_net <- nwhl_shots[nwhl_shots$`Detail 2` == "On Net",]
+on_net_counts <- data.frame(dplyr::count(nwhl_shots_on_net, nwhl_shots_on_net$Player))
+#shots_on_net <- merge(on_net_counts, shots_counts, by.x = "nwhl_shots_on_net.Player", by.y = "nwhl_shots.Player")
+shots_on_net <- dplyr::left_join(shots_counts, on_net_counts, by=c("nwhl_shots.Player"="nwhl_shots_on_net.Player"))
+shots_on_net[is.na(shots_on_net)] <- 0
+colnames(shots_on_net) <- c("Player", "shots", "on net")
+shots_on_net$OnNetRate <- shots_on_net$`on net` / shots_on_net$shots
+```
+
+z score, percentile, and scores
+```{r}
+shots_on_net$z <- (shots_on_net$OnNetRate - mean(shots_on_net$OnNetRate))/sd(shots_on_net$OnNetRate)
+shots_on_net$percentile <- pnorm(shots_on_net$z)
+shots_on_net$score <- cut(x = shots_on_net$percentile, breaks = c(0, 0.2, 0.4, 0.6, 0.8, 1), labels = c(1,2,3,4,5))
+```
+
+
+
+shots with traffic, on net (accuracy)
+```{r}
+shots_traffic <- nwhl_shots[nwhl_shots$`Detail 3` == "TRUE",]
+shots_traffic_on_net <- shots_traffic[shots_traffic$`Detail 2` == "On Net",]
+traffic_counts <- data.frame(dplyr::count(shots_traffic, shots_traffic$Player))
+shots_traffic_on_net_counts <- data.frame(dplyr::count(shots_traffic_on_net, shots_traffic_on_net$Player))
+#traffic_on_net <- merge(shots_traffic_on_net_counts, traffic_counts, by.y = "shots_traffic.Player", by.x = "shots_traffic_on_net.Player")
+traffic_on_net <- dplyr::left_join(traffic_counts, shots_traffic_on_net_counts, by=c("shots_traffic.Player"="shots_traffic_on_net.Player"))
+traffic_on_net[is.na(traffic_on_net)] <- 0
+colnames(traffic_on_net) <- c("Player", "shots with traffic", "on net")
+traffic_on_net$OnNetRate <- traffic_on_net$`on net` / traffic_on_net$`shots with traffic`
+```
+z score, percentile, and scores
+```{r}
+traffic_on_net$z <- (traffic_on_net$OnNetRate - mean(traffic_on_net$OnNetRate))/sd(traffic_on_net$OnNetRate)
+traffic_on_net$percentile <- pnorm(traffic_on_net$z)
+traffic_on_net$score <- cut(x = traffic_on_net$percentile, breaks = c(0, 0.2, 0.4, 0.6, 0.8, 1), labels = c(1,2,3,4,5))
+```
+
+
+
+One timer on net rate
+```{r}
+one_timer_shots <- nwhl_shots[nwhl_shots$`Detail 4` == "TRUE",]
+```
+only 76 players had one timer shots, throw away for now
+
+
+
+shot types
+```{r}
+shot_types <- data.frame(table(nwhl_shots[!duplicated(nwhl_shots[c("Player","Detail 1")]),"Player"]))
+colnames(shot_types) <- c("Player", "num of types")
+```
+scores
+```{r}
+shot_types$score <- cut(x = shot_types$`num of types`, breaks = c(1,2,3,4,5,7), labels = c(1,2,3,4,5), include.lowest = TRUE, right = FALSE)
+```
+
+
+
+total scores in a scale of 1 to 10
+```{r}
+scores <- data.frame(shots_on_net$Player, shots_on_net$score)
+scores <- dplyr::left_join(scores, select(goals_shots, c("Player", "score")), by=c("shots_on_net.Player"="Player"))
+scores <- dplyr::left_join(scores, select(traffic_on_net, c("Player", "score")), by=c("shots_on_net.Player"="Player"))
+scores <- dplyr::left_join(scores, select(shot_types, c("Player", "score")), by=c("shots_on_net.Player"="Player"))
+
+colnames(scores) <- c("Player", "shots_on_target", "shots_per_goal", "traffic_on_target","shot_types")
+```
+
+```{r}
+scores[,2:5] <- sapply(scores[,2:5], as.numeric)
+#fill nas in traffic_on_target
+scores$total_score <- 2*rowMeans(scores[,2:5])
+scores[is.na(scores)] <- 5
+```
+
+new scores using raw percentile
+```{r}
+shot_types$percentile <- shot_types$`num of types`/7
+
+new_scores <- data.frame(shots_on_net$Player, shots_on_net$percentile)
+new_scores <- dplyr::left_join(new_scores, select(goals_shots, c("Player", "percentile")), by=c("shots_on_net.Player"="Player"))
+new_scores <- dplyr::left_join(new_scores, select(traffic_on_net, c("Player", "percentile")), by=c("shots_on_net.Player"="Player"))
+new_scores <- dplyr::left_join(new_scores, select(shot_types, c("Player", "percentile")), by=c("shots_on_net.Player"="Player"))
+
+colnames(new_scores) <- c("Player", "shots_on_target", "shots_per_goal", "traffic_on_target","shot_types")
+```
+```{r}
+new_scores$total_score < NULL
+new_scores[is.na(new_scores)] <- 0.5
+new_scores$total_score <- 10*rowMeans(new_scores[,2:5])
+```
+
+
+```{r}
+write.csv(scores, "C:/Users/Steve/Desktop/ADS/datathon/scoring", row.names = TRUE)
+```
+
